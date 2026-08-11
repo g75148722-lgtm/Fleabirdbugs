@@ -1,9 +1,8 @@
 --[[
-  Feather Hub — remote-only loader
+  Feather Hub — remote-only loader (Fleabirdbugs)
   Fetches UILib + Hub + current PlaceId module from GitHub raw.
 
-  getgenv().FeatherHubURL = "https://raw.githubusercontent.com/YOUR_USER/FeatherHub/main/"
-  loadstring(game:HttpGet(getgenv().FeatherHubURL .. "FeatherHub.lua"))()
+  loadstring(game:HttpGet("https://raw.githubusercontent.com/g75148722-lgtm/Fleabirdbugs/main/FeatherHub.lua"))()
 ]]
 
 local okAll, errAll = pcall(function()
@@ -12,6 +11,7 @@ local PlaceId = game.PlaceId
 
 local REMOTE = rawget(getgenv(), "FeatherHubURL")
 	or rawget(getgenv(), "FEATHER_HUB_URL")
+	or "https://raw.githubusercontent.com/g75148722-lgtm/Fleabirdbugs/main/"
 
 if type(REMOTE) ~= "string" or #REMOTE < 12 then
 	error("set getgenv().FeatherHubURL to your raw GitHub base (trailing slash)")
