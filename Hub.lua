@@ -70,8 +70,10 @@ return function(Library, helpers)
 	local statusSec = home:Section("STATUS")
 	local statusLabel = statusSec:Label("Resolving game module...")
 
+	-- cheap: no-ops if text unchanged, avoids per-frame layout thrash when
+	-- game modules call this every Heartbeat tick
 	local function setStatus(t)
-		statusLabel.Text = tostring(t)
+		Library:SetText(statusLabel, t)
 		Window:SetFooter(t)
 	end
 
