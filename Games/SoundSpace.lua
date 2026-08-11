@@ -251,8 +251,12 @@ return {
 			Cfg.Lead = v / 1000
 		end)
 
+		local lastStatus = 0
 		ctx.Track(RunService.Heartbeat:Connect(function()
 			if not St.Alive then return end
+			local now = os.clock()
+			if now - lastStatus < 0.2 then return end
+			lastStatus = now
 			local run = GM._run
 			local hs = run and string.format("H:%s M:%s", tostring(run._hit), tostring(run._missed)) or "-"
 			ctx.SetStatus(string.format("SS locks:%d %s | %s", St.Locks, hs, St.Status))
