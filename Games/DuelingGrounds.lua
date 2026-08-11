@@ -194,6 +194,7 @@ return {
 		sec:Slider("Reach Studs", 0, 20, Cfg.ReachStuds, function(v) Cfg.ReachStuds = v end)
 		sec:Slider("Size Mult (x10)", 10, 40, math.floor(Cfg.SizeMult * 10), function(v) Cfg.SizeMult = v / 10 end)
 
+		local lastStatus = 0
 		ctx.Track(RunService.Heartbeat:Connect(function()
 			if not St.Alive then return end
 			local handler = getLocalHandler(false)
@@ -209,7 +210,11 @@ return {
 			else
 				destroyViz()
 			end
-			ctx.SetStatus(string.format("DG parries:%d reach:%d", St.Parries, St.Expands))
+			local now = os.clock()
+			if now - lastStatus > 0.2 then
+				lastStatus = now
+				ctx.SetStatus(string.format("DG parries:%d reach:%d", St.Parries, St.Expands))
+			end
 		end))
 
 		ctx.GameDestroy = function()
