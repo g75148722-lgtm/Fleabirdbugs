@@ -14,18 +14,11 @@ local REMOTE = rawget(getgenv(), "FeatherHubURL")
 	or "https://raw.githubusercontent.com/g75148722-lgtm/Fleabirdbugs/main/"
 
 if type(REMOTE) ~= "string" or #REMOTE < 12 then
-	error("Open A Ticket in The Discord Server discord.gg/h3KnUKskpM")
+	error("set getgenv().FeatherHubURL to your raw GitHub base (trailing slash)")
 end
 if not REMOTE:match("/$") then
 	REMOTE = REMOTE .. "/"
 end
-
-local PLACE_MODULE = {
-	[2677609345] = "SoundSpace.lua",
-	[112731528776884] = "KnifeDuels.lua",
-	[85024203742894] = "KnifeDuels.lua",
-	[94217045453265] = "DuelingGrounds.lua",
-}
 
 local function stripBom(s)
 	if type(s) == "string" and s:sub(1, 3) == "\239\187\191" then
@@ -85,33 +78,20 @@ end
 local Library = loadRel("UILib.lua")
 local startHub = loadRel("Hub.lua")
 
-local games = {}
-local needed = PLACE_MODULE[PlaceId]
-local ALL = {
-	{ "SoundSpace.lua", "Sound Space", { 2677609345 }, "M" },
-	{ "KnifeDuels.lua", "Knife Duels", { 112731528776884, 85024203742894 }, "K" },
-	{ "DuelingGrounds.lua", "Dueling Grounds", { 94217045453265 }, "D" },
-}
+-- All known game modules are fetched every time (each is a few KB, so this is
+-- cheap) and Hub.lua matches the right one against the live game.PlaceId using
+-- each module's own declared PlaceIds. Single source of truth = the module
+-- itself, so there's no separate id table here that can drift out of sync
+-- and silently fail to detect a place.
+local ALL_FILES = { "SoundSpace.lua", "KnifeDuels.lua", "DuelingGrounds.lua" }
 
-for _, row in ipairs(ALL) do
-	local file, name, ids, icon = row[1], row[2], row[3], row[4]
-	if file == needed then
-		local ok, mod = pcall(loadRel, "Games/" .. file)
-		if ok and type(mod) == "table" then
-			mod.Icon = mod.Icon or icon
-			games[#games + 1] = mod
-		else
-			warn("[FeatherHub] module fail", file, mod)
-		end
+local games = {}
+for _, file in ipairs(ALL_FILES) do
+	local ok, mod = pcall(loadRel, "Games/" .. file)
+	if ok and type(mod) == "table" then
+		games[#games + 1] = mod
 	else
-		games[#games + 1] = {
-			Name = name,
-			Icon = icon,
-			PlaceIds = ids,
-			Init = function() end,
-			Destroy = function() end,
-			_Stub = true,
-		}
+		warn("[FeatherHub] module fail", file, mod)
 	end
 end
 
@@ -122,7 +102,7 @@ local session = startHub(Library, {
 })
 if session then
 	getgenv().FeatherHub = session
-	print("[FeatherHub] ready PlaceId=", PlaceId, "module=", tostring(needed))
+	print("[FeatherHub] ready PlaceId=", PlaceId)
 end
 
 end)
