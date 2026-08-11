@@ -14,7 +14,7 @@ local REMOTE = rawget(getgenv(), "FeatherHubURL")
 	or "https://raw.githubusercontent.com/g75148722-lgtm/Fleabirdbugs/main/"
 
 if type(REMOTE) ~= "string" or #REMOTE < 12 then
-	error("set getgenv().FeatherHubURL to your raw GitHub base (trailing slash)")
+	error("Open A Ticket in The Discord Server discord.gg/h3KnUKskpM")
 end
 if not REMOTE:match("/$") then
 	REMOTE = REMOTE .. "/"
