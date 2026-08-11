@@ -108,42 +108,23 @@ local function onHover(obj, enter, leave)
 end
 
 -- ═══════════════════════════ LUCIDE IMAGE ICONS ═══════════════════════════
+-- Disk-cached PNGs via yielding HttpGet only (syn.request blocks Essential → 30s timeout).
+-- Lazy + serial queue — never preload a batch on window create.
 local ICON_DIR = "feather_icons_v1/"
-local ICON_CACHE = {} -- name -> content string (rbxassetid / getcustomasset path)
-local ICON_PENDING = {}
+local ICON_CACHE = {} -- name -> asset string | false (failed)
+local ICON_WAITERS = {} -- name -> { ImageLabel, ... }
+local ICON_QUEUE = {}
+local ICON_BUSY = false
 
 local ICON_ALIAS = {
-	knife = "sword",
-	combat = "swords",
-	throw = "crosshair",
-	visuals = "eye",
-	mode = "layers-2",
-	skins = "sparkles",
-	universal = "globe",
-	dueling = "shield",
-	sound = "music",
-	farm = "zap",
-	info = "user",
-	settings = "settings",
-	home = "home",
-	sword = "sword",
-	crosshair = "crosshair",
-	eye = "eye",
-	music = "music",
-	zap = "zap",
-	shield = "shield",
-	folder = "folder",
-	search = "search",
-	user = "user",
-	layers = "layers",
-	sliders = "sliders-horizontal",
-	gamepad = "gamepad-2",
-	sparkles = "sparkles",
-	box = "box",
-	power = "power",
-	globe = "globe",
-	minus = "minus",
-	x = "x",
+	knife = "sword", combat = "swords", throw = "crosshair", visuals = "eye",
+	mode = "layers-2", skins = "sparkles", universal = "globe", dueling = "shield",
+	sound = "music", farm = "zap", info = "user", settings = "settings",
+	home = "home", sword = "sword", crosshair = "crosshair", eye = "eye",
+	music = "music", zap = "zap", shield = "shield", folder = "folder",
+	search = "search", user = "user", layers = "layers",
+	sliders = "sliders-horizontal", gamepad = "gamepad-2", sparkles = "sparkles",
+	box = "box", power = "power", globe = "globe", minus = "minus", x = "x",
 }
 
 local function resolveIconName(name)
@@ -151,43 +132,15 @@ local function resolveIconName(name)
 	return ICON_ALIAS[key] or key
 end
 
-local function httpGetBytes(url)
-	if syn and syn.request then
-		local ok, res = pcall(function()
-			return syn.request({ Url = url, Method = "GET" })
-		end)
-		if ok and res and (res.Body or res.body) then
-			return res.Body or res.body
-		end
-	end
-	if request then
-		local ok, res = pcall(function()
-			return request({ Url = url, Method = "GET" })
-		end)
-		if ok and res and (res.Body or res.body) then
-			return res.Body or res.body
-		end
-	end
-	if http_request then
-		local ok, res = pcall(function()
-			return http_request({ Url = url, Method = "GET" })
-		end)
-		if ok and res and (res.Body or res.body) then
-			return res.Body or res.body
-		end
-	end
-	local ok, body = pcall(function()
-		return game:HttpGet(url)
-	end)
-	if ok then return body end
-	return nil
+local function hasCustomAsset()
+	return (getcustomasset or (syn and syn.getcustomasset) or getsynasset) ~= nil
 end
 
 local function toCustomAsset(path)
 	local fn = getcustomasset or (syn and syn.getcustomasset) or getsynasset
 	if not fn then return nil end
 	local ok, asset = pcall(fn, path)
-	if ok and type(asset) == "string" then return asset end
+	if ok and type(asset) == "string" and #asset > 0 then return asset end
 	return nil
 end
 
@@ -199,69 +152,109 @@ local function ensureIconDir()
 	end
 end
 
+-- MUST yield (game:HttpGet) — never syn.request here (blocks Essential watchdog)
+local function httpGetYield(url)
+	local ok, body = pcall(function()
+		return game:HttpGet(url)
+	end)
+	if ok and type(body) == "string" and #body > 40 then
+		return body
+	end
+	return nil
+end
+
 local function loadIconImage(name)
 	name = resolveIconName(name)
-	if ICON_CACHE[name] then return ICON_CACHE[name] end
+	if ICON_CACHE[name] ~= nil then
+		return ICON_CACHE[name] ~= false and ICON_CACHE[name] or nil
+	end
 
 	local path = ICON_DIR .. name .. ".png"
 	ensureIconDir()
 
-	-- reuse cached file
-	if isfile and isfile(path) then
-		local asset = toCustomAsset(path)
-		if asset then
-			ICON_CACHE[name] = asset
-			return asset
+	if isfile and writefile and hasCustomAsset() then
+		if isfile(path) then
+			local asset = toCustomAsset(path)
+			if asset then
+				ICON_CACHE[name] = asset
+				return asset
+			end
+		end
+
+		local url = string.format(
+			"https://api.iconify.design/lucide/%s.png?height=64&width=64&color=ffffff",
+			name
+		)
+		local body = httpGetYield(url)
+		task.wait() -- keep Essential watchdog happy
+		if body then
+			pcall(writefile, path, body)
+			local asset = toCustomAsset(path)
+			if asset then
+				ICON_CACHE[name] = asset
+				return asset
+			end
 		end
 	end
 
-	-- fetch Lucide PNG from Iconify (white, 64px)
-	local url = string.format(
-		"https://api.iconify.design/lucide/%s.png?height=64&width=64&color=ffffff",
-		name
-	)
-	local body = httpGetBytes(url)
-	if type(body) ~= "string" or #body < 40 then
-		return nil
-	end
-
-	if writefile then
-		pcall(writefile, path, body)
-		local asset = toCustomAsset(path)
-		if asset then
-			ICON_CACHE[name] = asset
-			return asset
-		end
-	end
-
+	ICON_CACHE[name] = false
 	return nil
+end
+
+local function flushIconWaiters(name, asset)
+	local waiters = ICON_WAITERS[name]
+	ICON_WAITERS[name] = nil
+	if not waiters then return end
+	for _, img in ipairs(waiters) do
+		if img and img.Parent and asset then
+			img.Image = asset
+		end
+	end
+end
+
+local function pumpIconQueue()
+	if ICON_BUSY then return end
+	ICON_BUSY = true
+	task.spawn(function()
+		while #ICON_QUEUE > 0 do
+			local name = table.remove(ICON_QUEUE, 1)
+			local asset = loadIconImage(name)
+			flushIconWaiters(name, asset)
+			task.wait(0.05)
+		end
+		ICON_BUSY = false
+	end)
 end
 
 local function applyIconImage(imageLabel, name)
 	name = resolveIconName(name)
+
 	local cached = ICON_CACHE[name]
 	if cached then
 		imageLabel.Image = cached
 		return
 	end
-
-	if ICON_PENDING[name] then
-		table.insert(ICON_PENDING[name], imageLabel)
+	if cached == false then
 		return
 	end
 
-	ICON_PENDING[name] = { imageLabel }
-	task.spawn(function()
-		local asset = loadIconImage(name)
-		local waiters = ICON_PENDING[name]
-		ICON_PENDING[name] = nil
-		if not asset or not waiters then return end
-		for _, img in ipairs(waiters) do
-			if img and img.Parent then
-				img.Image = asset
-			end
+	-- disk hit without network (sync, cheap)
+	local path = ICON_DIR .. name .. ".png"
+	if isfile and hasCustomAsset() and isfile(path) then
+		local asset = toCustomAsset(path)
+		if asset then
+			ICON_CACHE[name] = asset
+			imageLabel.Image = asset
+			return
 		end
-	end)
+	end
+
+	if not ICON_WAITERS[name] then
+		ICON_WAITERS[name] = {}
+		ICON_QUEUE[#ICON_QUEUE + 1] = name
+	end
+	table.insert(ICON_WAITERS[name], imageLabel)
+	pumpIconQueue()
 end
 
 local function makeIcon(parent, name, size, color)
@@ -297,13 +290,7 @@ local function makeIcon(parent, name, size, color)
 end
 
 Library.MakeIcon = makeIcon
-Library.PreloadIcons = function(names)
-	task.spawn(function()
-		for _, n in ipairs(names or {}) do
-			loadIconImage(n)
-		end
-	end)
-end
+Library.PreloadIcons = function() end -- no-op: batch preload caused Essential 30s timeout
 
 -- ─────────────────────────── NOTIFICATIONS ────────────────────────────────
 function Library:Notify(title, body, duration)
@@ -355,13 +342,6 @@ function Library:CreateWindow(opts)
 	local titleTxt = opts.Title or "Feather"
 	local subTxt = opts.Subtitle or ""
 	local RAIL = 56
-
-	-- warm common Lucide PNGs in background
-	Library.PreloadIcons({
-		"home", "settings", "sword", "swords", "crosshair", "eye",
-		"music", "shield", "sparkles", "layers-2", "layers", "globe",
-		"user", "minus", "box", "zap", "folder", "sliders-horizontal",
-	})
 
 	for _, g in ipairs({ CoreGui, LP and LP:FindFirstChildOfClass("PlayerGui") }) do
 		if g then
